@@ -605,29 +605,29 @@ void bt_app_a2d_cb(esp_a2d_cb_event_t event, esp_a2d_cb_param_t *param)
 
 void bt_app_a2d_data_cb(const uint8_t *data, uint32_t len)
 {
-    // اعمال volume
     static uint8_t last_volume = 0x7f;
     _lock_acquire(&s_volume_lock);
     uint8_t volume = s_volume;
     _lock_release(&s_volume_lock);
 
-    // اگر volume تغییر کرده باشد، log بزن
     if (volume != last_volume) {
         ESP_LOGI(BT_AV_TAG, "Apply volume: %d/127", volume);
         last_volume = volume;
     }
 
-    // محاسبه ضریب volume (0.0 تا 1.0)
-    float vol_factor = (float)volume / 0x7f;
+    // نگاشت خطی ولوم گوشی (۰ تا ۱۲۷) به ۰ تا ۰.۷
+    float percent = (float)volume / 127.0f;
+    float vol_factor = percent * 0.5f;
 
-    // داده جدید برای اعمال volume
     uint8_t *vol_data = NULL;
-    if (vol_factor < 0.99f) { // اگر volume کمتر از max است
+    if (vol_factor < 0.99f) {
         vol_data = malloc(len);
         if (vol_data) {
             for (uint32_t i = 0; i < len; i += 2) {
                 int16_t sample = (int16_t)(data[i] | (data[i+1] << 8));
                 sample = (int16_t)(sample * vol_factor);
+                if (sample > 32767) sample = 32767;
+                if (sample < -32768) sample = -32768;
                 vol_data[i] = sample & 0xFF;
                 vol_data[i+1] = (sample >> 8) & 0xFF;
             }
@@ -635,11 +635,9 @@ void bt_app_a2d_data_cb(const uint8_t *data, uint32_t len)
             free(vol_data);
         }
     } else {
-        // اگر volume روی max است، داده را مستقیم ارسال کن
         write_ringbuf(data, len);
     }
 
-    // log تعداد packet
     if (++s_pkt_cnt % 100 == 0) {
         ESP_LOGI(BT_AV_TAG, "Audio packet count: %"PRIu32, s_pkt_cnt);
     }
