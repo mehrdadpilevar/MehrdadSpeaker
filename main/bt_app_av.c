@@ -26,7 +26,8 @@
 #else
 #include "driver/i2s_std.h"
 #endif
-
+#include "driver/gpio.h"
+#include "esp_timer.h"
 #include "sys/lock.h"
 
 /* AVRCP used transaction labels */
@@ -38,6 +39,19 @@
 
 /* Application layer causes delay value */
 #define APP_DELAY_VALUE                  50  // 5ms
+
+
+#define ENCODER_SW_GPIO 16
+#define ENCODER_PIN_A 18
+#define ENCODER_PIN_B 19
+
+#define CLICK_TIMEOUT_MS 400
+
+typedef enum {
+    PLAYER_STATE_STOPPED,
+    PLAYER_STATE_PLAYING
+} player_state_t;
+static player_state_t player_state = PLAYER_STATE_STOPPED;
 
 /*******************************
  * STATIC FUNCTION DECLARATIONS
@@ -69,6 +83,10 @@ static void bt_av_hdl_a2d_evt(uint16_t event, void *p_param);
 static void bt_av_hdl_avrc_ct_evt(uint16_t event, void *p_param);
 /* avrc target event handler */
 static void bt_av_hdl_avrc_tg_evt(uint16_t event, void *p_param);
+
+static void encoder_poll_task(void *arg);
+static void encoder_button_task(void *arg);
+
 
 /*******************************
  * STATIC VARIABLE DEFINITIONS
@@ -540,6 +558,8 @@ static void bt_av_hdl_avrc_tg_evt(uint16_t event, void *p_param)
         if (rc->conn_stat.connected) {
             /* create task to simulate volume change */
             // xTaskCreate(volume_change_simulation, "vcsTask", 2048, NULL, 5, &s_vcs_task_hdl);
+            xTaskCreate(encoder_poll_task, "encoder_task", 6144, NULL, 5, NULL);
+            xTaskCreate(encoder_button_task, "encoder_button_task", 2048, NULL, 5, NULL);
         } else {
             vTaskDelete(s_vcs_task_hdl);
             ESP_LOGI(BT_RC_TG_TAG, "Stop volume change simulation");
@@ -580,6 +600,80 @@ static void bt_av_hdl_avrc_tg_evt(uint16_t event, void *p_param)
     }
 }
 
+static void encoder_poll_task(void *arg)
+{
+    gpio_set_direction(ENCODER_PIN_A, GPIO_MODE_INPUT);
+    gpio_set_direction(ENCODER_PIN_B, GPIO_MODE_INPUT);
+    gpio_pullup_en(ENCODER_PIN_A);
+    gpio_pullup_en(ENCODER_PIN_B);
+
+    uint8_t volume = 64;
+    int lastA = gpio_get_level(ENCODER_PIN_A);
+
+    while (1) {
+        int A = gpio_get_level(ENCODER_PIN_A);
+        int B = gpio_get_level(ENCODER_PIN_B);
+        if (A != lastA) {
+            if (B != A && volume <= 125) volume += 2;
+            else if (volume >= 2) volume -= 2;
+            ESP_LOGI("ENCODER", "Volume: %d", volume);
+            volume_set_by_local_host(volume);
+            lastA = A;
+        }
+        vTaskDelay(pdMS_TO_TICKS(10));
+    }
+}
+
+
+
+static void encoder_button_task(void *arg)
+{
+    gpio_set_direction(ENCODER_SW_GPIO, GPIO_MODE_INPUT);
+    gpio_pullup_en(ENCODER_SW_GPIO);
+
+    int last_state = gpio_get_level(ENCODER_SW_GPIO);
+    int click_count = 0;
+    int64_t last_click_time = 0;
+
+    while (1) {
+        int state = gpio_get_level(ENCODER_SW_GPIO);
+        if (last_state == 1 && state == 0) { // لبه پایین‌رو (کلیک)
+            int64_t now = esp_timer_get_time() / 1000; // میلی‌ثانیه
+            if (now - last_click_time > CLICK_TIMEOUT_MS) {
+                click_count = 0; // اگر فاصله زیاد شد، شمارنده ریست شود
+            }
+            click_count++;
+            last_click_time = now;
+        }
+        last_state = state;
+
+        // اگر کلیک ثبت شده و زمانش گذشته، نوع کلیک را تشخیص بده
+        if (click_count > 0) {
+            int64_t now = esp_timer_get_time() / 1000;
+            if (now - last_click_time > CLICK_TIMEOUT_MS) {
+                if (click_count == 1) {
+                    // Play/Pause
+                    ESP_LOGI("ENCODER_BTN", "Single click: Play/Pause");
+                    esp_avrc_ct_send_passthrough_cmd(0, ESP_AVRC_PT_CMD_PLAY, ESP_AVRC_PT_CMD_STATE_PRESSED);
+                    esp_avrc_ct_send_passthrough_cmd(0, ESP_AVRC_PT_CMD_PLAY, ESP_AVRC_PT_CMD_STATE_RELEASED);
+                } else if (click_count == 2) {
+                    // Next Track
+                    ESP_LOGI("ENCODER_BTN", "Double click: Next Track");
+                    esp_avrc_ct_send_passthrough_cmd(0, ESP_AVRC_PT_CMD_FORWARD, ESP_AVRC_PT_CMD_STATE_PRESSED);
+                    esp_avrc_ct_send_passthrough_cmd(0, ESP_AVRC_PT_CMD_FORWARD, ESP_AVRC_PT_CMD_STATE_RELEASED);
+                } else if (click_count == 3) {
+                    // Previous Track
+                    ESP_LOGI("ENCODER_BTN", "Triple click: Previous Track");
+                    esp_avrc_ct_send_passthrough_cmd(0, ESP_AVRC_PT_CMD_BACKWARD, ESP_AVRC_PT_CMD_STATE_PRESSED);
+                    esp_avrc_ct_send_passthrough_cmd(0, ESP_AVRC_PT_CMD_BACKWARD, ESP_AVRC_PT_CMD_STATE_RELEASED);
+                }
+                click_count = 0;
+            }
+        }
+
+        vTaskDelay(pdMS_TO_TICKS(10));
+    }
+}
 /********************************
  * EXTERNAL FUNCTION DEFINITIONS
  *******************************/
@@ -626,8 +720,6 @@ void bt_app_a2d_data_cb(const uint8_t *data, uint32_t len)
             for (uint32_t i = 0; i < len; i += 2) {
                 int16_t sample = (int16_t)(data[i] | (data[i+1] << 8));
                 sample = (int16_t)(sample * vol_factor);
-                if (sample > 32767) sample = 32767;
-                if (sample < -32768) sample = -32768;
                 vol_data[i] = sample & 0xFF;
                 vol_data[i+1] = (sample >> 8) & 0xFF;
             }
@@ -689,3 +781,4 @@ void bt_app_rc_tg_cb(esp_avrc_tg_cb_event_t event, esp_avrc_tg_cb_param_t *param
         break;
     }
 }
+
