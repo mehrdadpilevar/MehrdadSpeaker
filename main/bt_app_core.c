@@ -59,7 +59,9 @@ static uint16_t ringbuffer_mode = RINGBUFFER_MODE_PROCESSING;
  * EXTERNAL FUNCTION DECLARATIONS
  ********************************/
 #ifndef CONFIG_EXAMPLE_A2DP_SINK_OUTPUT_INTERNAL_DAC
-extern i2s_chan_handle_t tx_chan;
+// extern i2s_chan_handle_t tx_chan;
+extern i2s_chan_handle_t tx_chan_mid;
+extern i2s_chan_handle_t tx_chan_bass;
 #else
 extern dac_continuous_handle_t tx_chan;
 #endif
@@ -141,7 +143,8 @@ static void bt_i2s_task_handler(void *arg)
             #ifdef CONFIG_EXAMPLE_A2DP_SINK_OUTPUT_INTERNAL_DAC
                 dac_continuous_write(tx_chan, data, item_size, &bytes_written, -1);
             #else
-                i2s_channel_write(tx_chan, data, item_size, &bytes_written, portMAX_DELAY);
+            i2s_channel_write(tx_chan_mid, data, item_size, &bytes_written, portMAX_DELAY);
+            i2s_channel_write(tx_chan_bass, data, item_size, &bytes_written, portMAX_DELAY);
             #endif
                 vRingbufferReturnItem(s_ringbuf_i2s, (void *)data);
             }
