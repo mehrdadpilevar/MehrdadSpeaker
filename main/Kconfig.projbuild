@@ -27,30 +27,53 @@ menu "A2DP Example Configuration"
 
     endchoice
 
-    config EXAMPLE_I2S_LRCK_PIN
-        int "I2S LRCK (WS) GPIO"
-        default 22
+    config MIDRANGE_I2S_LRCK_PIN
+        int "I2S LRCK (WS) GPIO MIDRANGE"
+        default 17
         depends on EXAMPLE_A2DP_SINK_OUTPUT_EXTERNAL_I2S
         help
-            GPIO number to use for I2S LRCK(WS) Driver.
+            GPIO number to use for I2S LRCK(WS) Driver MIDRANGE.
 
-    config EXAMPLE_I2S_BCK_PIN
-        int "I2S BCK GPIO"
+    config MIDRANGE_I2S_BCK_PIN
+        int "I2S BCK GPIO MIDRANGE"
         default 26
         depends on EXAMPLE_A2DP_SINK_OUTPUT_EXTERNAL_I2S
         help
-            GPIO number to use for I2S BCK Driver.
+            GPIO number to use for I2S BCK Driver MIDRANGE.
 
-    config EXAMPLE_I2S_DATA_PIN
-        int "I2S DATA GPIO"
+    config MIDRANGE_I2S_DATA_PIN
+        int "I2S DATA GPIO MIDRANGE"
         default 25
         depends on EXAMPLE_A2DP_SINK_OUTPUT_EXTERNAL_I2S
         help
-            GPIO number to use for I2S Data Driver.
+            GPIO number to use for I2S Data Driver MIDRANGE.
+
+    config BASS_I2S_LRCK_PIN
+        int "I2S LRCK (WS) GPIO BASS"
+        default 14
+        depends on EXAMPLE_A2DP_SINK_OUTPUT_EXTERNAL_I2S
+        help
+            GPIO number to use for I2S LRCK(WS) Driver BASS.
+
+    config BASS_I2S_BCK_PIN
+        int "I2S BCK GPIO BASS"
+        default 16
+        depends on EXAMPLE_A2DP_SINK_OUTPUT_EXTERNAL_I2S
+        help
+            GPIO number to use for I2S BCK Driver BASS.
+
+    config BASS_I2S_DATA_PIN
+        int "I2S DATA GPIO BASS"
+        default 27
+        depends on EXAMPLE_A2DP_SINK_OUTPUT_EXTERNAL_I2S
+        help
+            GPIO number to use for I2S Data Driver BASS.
+
+
 
     config EXAMPLE_LOCAL_DEVICE_NAME
         string "Local Device Name"
-        default "ESP_SPEAKER"
+        default "Mehrdad Speaker"
         help
             Use this option to set local device name.
 
