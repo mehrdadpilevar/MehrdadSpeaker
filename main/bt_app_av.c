@@ -88,7 +88,7 @@ static esp_avrc_rn_evt_cap_mask_t s_avrc_peer_rn_cap;
                                              /* AVRC target notification capability bit mask */
 static _lock_t s_volume_lock;
 static TaskHandle_t s_vcs_task_hdl = NULL;    /* handle for volume change simulation task */
-static uint8_t s_volume = 0;                 /* local volume value */
+static uint8_t s_volume = 0x7f;                 /* local volume value */
 static bool s_volume_notify;                 /* notify volume change or not */
 #ifndef CONFIG_EXAMPLE_A2DP_SINK_OUTPUT_INTERNAL_DAC
 // i2s_chan_handle_t tx_chan = NULL;
@@ -641,31 +641,33 @@ void bt_app_a2d_cb(esp_a2d_cb_event_t event, esp_a2d_cb_param_t *param)
 
 void bt_app_a2d_data_cb(const uint8_t *data, uint32_t len)
 {
-   // Split audio data into midrange and bass
-   int16_t *audio_data = (int16_t *)data;
-//    int16_t midrange_data[len / 2];
-//    int16_t bass_data[len / 2];
+    // اعمال ولوم نرم‌افزاری روی داده PCM
+    int16_t *audio_in = (int16_t *)data;
+    size_t samples = len / 2;
+    int16_t *audio_vol = malloc(len);
+    if (!audio_vol) return;
 
-//    for (int i = 0; i < len / 2; i++) {
-//        // Apply a simple high-pass filter for midrange
-//        midrange_data[i] = audio_data[i] - (audio_data[i] >> 3); // Adjust filter as needed
+    float vol_factor;
+    _lock_acquire(&s_volume_lock);
+    vol_factor = (float)s_volume / 0x7f;
+    _lock_release(&s_volume_lock);
 
-//        // Apply a simple low-pass filter for bass
-//        bass_data[i] = audio_data[i] >> 3; // Adjust filter as needed
-//    }
+    for (size_t i = 0; i < samples; i++) {
+        int32_t sample = (int32_t)(audio_in[i] * vol_factor);
+        if (sample > 32767) sample = 32767;
+        if (sample < -32768) sample = -32768;
+        audio_vol[i] = (int16_t)sample;
+    }
 
-   // Write midrange data to midrange I2S channel
-   size_t bytes_written_mid;
-   i2s_channel_write(tx_chan_mid, audio_data, len, &bytes_written_mid, portMAX_DELAY);
+    size_t bytes_written_mid, bytes_written_bass;
+    i2s_channel_write(tx_chan_mid, audio_vol, len, &bytes_written_mid, portMAX_DELAY);
+    i2s_channel_write(tx_chan_bass, audio_vol, len, &bytes_written_bass, portMAX_DELAY);
 
-   // Write bass data to bass I2S channel
-   size_t bytes_written_bass;
-   i2s_channel_write(tx_chan_bass, audio_data, len, &bytes_written_bass, portMAX_DELAY);
+    free(audio_vol);
 
-   // Log packet count
-   if (++s_pkt_cnt % 100 == 0) {
-       ESP_LOGI(BT_AV_TAG, "Audio packet count: %"PRIu32, s_pkt_cnt);
-   }
+    if (++s_pkt_cnt % 100 == 0) {
+        ESP_LOGI(BT_AV_TAG, "Audio packet count: %"PRIu32, s_pkt_cnt);
+    }
 }
 
 void bt_app_rc_ct_cb(esp_avrc_ct_cb_event_t event, esp_avrc_ct_cb_param_t *param)
