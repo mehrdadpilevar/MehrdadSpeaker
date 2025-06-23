@@ -42,6 +42,22 @@
 /* Application layer causes delay value */
 #define APP_DELAY_VALUE                  50  // 5ms
 
+
+
+#define MAX_AUDIO_BUF 4096 // حداکثر اندازه بافر صوتی (بسته به پروژه قابل تغییر است)
+#define IIR_ALPHA 0.0175f  // ضریب فیلتر پایین‌گذر (120Hz برای 44100Hz)
+
+// بافر استاتیک برای جلوگیری از malloc/free
+static int16_t audio_mid[MAX_AUDIO_BUF / 2];
+static int16_t audio_bass[MAX_AUDIO_BUF / 2];
+
+// متغیر فیلتر پایین‌گذر
+static float lp_y = 0;
+
+// ولوم جداگانه برای هر خروجی (۰ تا ۱)
+static float volume_bass = 0.3f;
+static float volume_mid = 0.3f;
+
 /*******************************
  * STATIC FUNCTION DECLARATIONS
  ******************************/
@@ -573,7 +589,7 @@ static void bt_av_hdl_avrc_tg_evt(uint16_t event, void *p_param)
                  rc->conn_stat.connected, bda[0], bda[1], bda[2], bda[3], bda[4], bda[5]);
         if (rc->conn_stat.connected) {
             /* create task to simulate volume change */
-            xTaskCreate(volume_change_simulation, "vcsTask", 2048, NULL, 5, &s_vcs_task_hdl);
+            // xTaskCreate(volume_change_simulation, "vcsTask", 2048, NULL, 5, &s_vcs_task_hdl);
         } else {
             vTaskDelete(s_vcs_task_hdl);
             ESP_LOGI(BT_RC_TG_TAG, "Stop volume change simulation");
@@ -641,33 +657,34 @@ void bt_app_a2d_cb(esp_a2d_cb_event_t event, esp_a2d_cb_param_t *param)
 
 void bt_app_a2d_data_cb(const uint8_t *data, uint32_t len)
 {
-    // اعمال ولوم نرم‌افزاری روی داده PCM
+    if (len > MAX_AUDIO_BUF) return; // محافظت در برابر بافر بزرگ‌تر از حد
+
     int16_t *audio_in = (int16_t *)data;
     size_t samples = len / 2;
-    int16_t *audio_vol = malloc(len);
-    if (!audio_vol) return;
 
-    float vol_factor;
-    _lock_acquire(&s_volume_lock);
-    vol_factor = (float)s_volume / 0x7f;
-    _lock_release(&s_volume_lock);
+    // ولوم کلی (از بلوتوث)
+    float vol_factor = (float)s_volume / 0x7f;
 
     for (size_t i = 0; i < samples; i++) {
-        int32_t sample = (int32_t)(audio_in[i] * vol_factor);
-        if (sample > 32767) sample = 32767;
-        if (sample < -32768) sample = -32768;
-        audio_vol[i] = (int16_t)sample;
+        float x = (float)(audio_in[i] * vol_factor);
+
+        // فیلتر پایین‌گذر (bass)
+        lp_y = IIR_ALPHA * x + (1.0f - IIR_ALPHA) * lp_y;
+        float bass = lp_y * volume_bass;
+        if (bass > 32767) bass = 32767;
+        if (bass < -32768) bass = -32768;
+        audio_bass[i] = (int16_t)bass;
+
+        // فیلتر بالاگذر مکمل (mid/tweeter)
+        float mid = (x - lp_y) * volume_mid;
+        if (mid > 32767) mid = 32767;
+        if (mid < -32768) mid = -32768;
+        audio_mid[i] = (int16_t)mid;
     }
 
     size_t bytes_written_mid, bytes_written_bass;
-    i2s_channel_write(tx_chan_mid, audio_vol, len, &bytes_written_mid, portMAX_DELAY);
-    i2s_channel_write(tx_chan_bass, audio_vol, len, &bytes_written_bass, portMAX_DELAY);
-
-    free(audio_vol);
-
-    if (++s_pkt_cnt % 100 == 0) {
-        ESP_LOGI(BT_AV_TAG, "Audio packet count: %"PRIu32, s_pkt_cnt);
-    }
+    i2s_channel_write(tx_chan_mid, audio_mid, len, &bytes_written_mid, portMAX_DELAY);
+    i2s_channel_write(tx_chan_bass, audio_bass, len, &bytes_written_bass, portMAX_DELAY);
 }
 
 void bt_app_rc_ct_cb(esp_avrc_ct_cb_event_t event, esp_avrc_ct_cb_param_t *param)

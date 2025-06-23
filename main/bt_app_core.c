@@ -24,6 +24,7 @@
 
 #define RINGBUF_HIGHEST_WATER_LEVEL    (32 * 1024)
 #define RINGBUF_PREFETCH_WATER_LEVEL   (20 * 1024)
+#define MAX_AUDIO_BUF (32 * 1024)
 
 enum {
     RINGBUFFER_MODE_PROCESSING,    /* ringbuffer is buffering incoming audio data, I2S is working */
@@ -236,6 +237,8 @@ size_t write_ringbuf(const uint8_t *data, size_t size)
 {
     size_t item_size = 0;
     BaseType_t done = pdFALSE;
+
+    if (size > MAX_AUDIO_BUF) return 0; // محافظت
 
     if (ringbuffer_mode == RINGBUFFER_MODE_DROPPING) {
         ESP_LOGW(BT_APP_CORE_TAG, "ringbuffer is full, drop this packet!");
