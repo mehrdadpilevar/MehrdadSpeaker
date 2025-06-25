@@ -73,7 +73,7 @@ extern dac_continuous_handle_t tx_chan;
 
 static bool bt_app_send_msg(bt_app_msg_t *msg)
 {
-    if (msg == NULL) {
+    if (msg == NULL || s_bt_app_task_queue == NULL) {
         return false;
     }
 
@@ -186,17 +186,19 @@ bool bt_app_work_dispatch(bt_app_cb_t p_cback, uint16_t event, void *p_params, i
 
 void bt_app_task_start_up(void)
 {
-    s_bt_app_task_queue = xQueueCreate(10, sizeof(bt_app_msg_t));
-    xTaskCreate(bt_app_task_handler, "BtAppTask", 3072, NULL, 10, &s_bt_app_task_handle);
+    if (s_bt_app_task_queue == NULL) {
+        s_bt_app_task_queue = xQueueCreate(10, sizeof(bt_app_msg_t));
+        xTaskCreate(bt_app_task_handler, "BtAppTask", 3072, NULL, 10, &s_bt_app_task_handle);
+    }
 }
 
 void bt_app_task_shut_down(void)
 {
-    if (s_bt_app_task_handle) {
+    if (s_bt_app_task_handle != NULL) {
         vTaskDelete(s_bt_app_task_handle);
         s_bt_app_task_handle = NULL;
     }
-    if (s_bt_app_task_queue) {
+    if (s_bt_app_task_queue != NULL) {
         vQueueDelete(s_bt_app_task_queue);
         s_bt_app_task_queue = NULL;
     }
