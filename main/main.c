@@ -32,7 +32,10 @@
 #define ENCODER_SW_GPIO 19 
 #define CLICK_TIMEOUT_MS 400
 
-extern bool party_mode; 
+bool party_mode=false; 
+bool is_playing = false;
+
+
 static bool system_on = false;
 static const char local_device_name[] = CONFIG_EXAMPLE_LOCAL_DEVICE_NAME;
 enum
@@ -221,18 +224,21 @@ static void system_stop(void)
     mute_audio_output();
     vTaskDelay(pdMS_TO_TICKS(200));
 
-    // Deinit سرویس‌ها فقط اگر قبلاً init شده‌اند
-    esp_a2d_sink_deinit();
-    esp_avrc_ct_deinit();
-    esp_avrc_tg_deinit();
+    esp_err_t err;
+    err = esp_a2d_sink_deinit();
+    ESP_LOGI("SYSTEM", "esp_a2d_sink_deinit: %s", esp_err_to_name(err));
+    err = esp_avrc_ct_deinit();
+    ESP_LOGI("SYSTEM", "esp_avrc_ct_deinit: %s", esp_err_to_name(err));
+    err = esp_avrc_tg_deinit();
+    ESP_LOGI("SYSTEM", "esp_avrc_tg_deinit: %s", esp_err_to_name(err));
 
     bt_app_task_shut_down();
     esp_bluedroid_disable();
     esp_bluedroid_deinit();
+    mute_audio_output();
     esp_bt_controller_disable();
     esp_bt_controller_deinit();
     ESP_LOGI("SYSTEM", "System turned OFF");
-    mute_audio_output();
 
     system_on = false;
 }
@@ -351,7 +357,7 @@ void encoder_task(void *arg)
                     else if (click_count == 4)
                     {
                         party_mode = !party_mode;                                  // تغییر وضعیت مد پارتی
-                        gpio_set_level(PARTY_MODE_LED_GPIO, (party_mode ? 0 : 1)); // روشن/خاموش کردن LED
+                        gpio_set_level(PARTY_MODE_LED_GPIO, (party_mode ? 1 : 0)); // روشن/خاموش کردن LED
                     }
                 }
                 click_count = 0;

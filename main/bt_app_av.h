@@ -57,8 +57,8 @@ typedef enum {
 
 
 void mute_audio_output();
-static bool is_playing = false;
-static bool party_mode = false;
+extern bool is_playing ;
+extern bool party_mode ;
 
 /* AVRCP used transaction labels */
 #define APP_RC_CT_TL_GET_CAPS (0)

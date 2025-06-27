@@ -30,7 +30,7 @@
 #include "esp_timer.h"
 #include "sys/lock.h"
 #define MAX_AUDIO_BUF 8192 // حداکثر اندازه بافر صوتی (بسته به پروژه قابل تغییر است)
-#define IIR_ALPHA 0.0175f  // ضریب فیلتر پایین‌گذر (120Hz برای 44100Hz)
+#define IIR_ALPHA 0.04f    // ضریب فیلتر پایین‌گذر (120Hz برای 44100Hz)
 
 // بافر استاتیک برای جلوگیری از malloc/free
 static int16_t audio_mid[MAX_AUDIO_BUF / 2];
@@ -40,9 +40,9 @@ static int16_t audio_bass[MAX_AUDIO_BUF / 2];
 static float lp_y = 0;
 
 // ولوم جداگانه برای هر خروجی (۰ تا ۱)
-static float volume_bass = 0.6f;
-static float volume_mid = 0.6f;
-
+static float volume_bass = 0.2f;
+static float volume_mid = 0.2f;
+extern bool party_mode;
 
 /*******************************
  * STATIC FUNCTION DECLARATIONS
@@ -93,7 +93,7 @@ static esp_avrc_rn_evt_cap_mask_t s_avrc_peer_rn_cap;
 /* AVRC target notification capability bit mask */
 static _lock_t s_volume_lock;
 static TaskHandle_t s_encoder_task_hdl = NULL;
-static uint8_t s_volume = 0x65f; /* local volume value */
+static uint8_t s_volume = 100; /* local volume value */
 static bool s_volume_notify;    /* notify volume change or not */
 #ifndef CONFIG_EXAMPLE_A2DP_SINK_OUTPUT_INTERNAL_DAC
 // i2s_chan_handle_t tx_chan = NULL;
@@ -285,7 +285,7 @@ void bt_i2s_driver_uninstall(void)
 
 static void volume_set_by_controller(uint8_t volume)
 {
-    ESP_LOGI(BT_RC_TG_TAG, "Volume is set by remote controller to: %" PRIu32 "%%", (uint32_t)volume * 100 / 0x7f);
+    ESP_LOGI(BT_RC_TG_TAG, "Volume is set by remote controller to: %" PRIu32 "%%", (uint32_t)volume * 100 / 500);
     /* set the volume in protection of lock */
     _lock_acquire(&s_volume_lock);
     s_volume = volume;
@@ -294,7 +294,7 @@ static void volume_set_by_controller(uint8_t volume)
 
 static void volume_set_by_local_host(uint8_t volume)
 {
-    ESP_LOGI(BT_RC_TG_TAG, "Volume is set locally to: %" PRIu32 "%%", (uint32_t)volume * 100 / 0x7f);
+    ESP_LOGI(BT_RC_TG_TAG, "Volume is set locally to: %" PRIu32 "%%", (uint32_t)volume * 100 / 500);
     /* set the volume in protection of lock */
     _lock_acquire(&s_volume_lock);
     s_volume = volume;
@@ -658,7 +658,7 @@ static void bt_av_hdl_avrc_tg_evt(uint16_t event, void *p_param)
     /* when absolute volume command from remote device set, this event comes */
     case ESP_AVRC_TG_SET_ABSOLUTE_VOLUME_CMD_EVT:
     {
-        ESP_LOGI(BT_RC_TG_TAG, "AVRC set absolute volume: %d%%", (int)rc->set_abs_vol.volume * 100 / 0x7f);
+        ESP_LOGI(BT_RC_TG_TAG, "AVRC set absolute volume: %d%%", (int)rc->set_abs_vol.volume * 100 / 500);
         volume_set_by_controller(rc->set_abs_vol.volume);
         break;
     }
@@ -740,7 +740,7 @@ static void encoder_poll_task(void *arg)
                     volume = 0;
             }
 
-            ESP_LOGI("ENCODER", "-------------------------------Volume: %d (step: %d)", volume, step);
+            ESP_LOGI("ENCODER", "-------------------------------Volume: %d (step: %d) partymode:%d", volume, step, party_mode);
             volume_set_by_local_host(volume);
             lastA = A;
         }
@@ -776,28 +776,44 @@ void bt_app_a2d_cb(esp_a2d_cb_event_t event, esp_a2d_cb_param_t *param)
 void bt_app_a2d_data_cb(const uint8_t *data, uint32_t len)
 {
     if (len > MAX_AUDIO_BUF)
-        return; // محافظت در برابر بافر بزرگ‌تر از حد
+        return;
 
     int16_t *audio_in = (int16_t *)data;
     size_t samples = len / 2;
 
-    // ولوم کلی (از بلوتوث)
-    float vol_factor = (float)s_volume / 0x7f;
+    float vol_factor = (float)s_volume / 500;
+    if (vol_factor > 1.0f)
+        vol_factor = 1.0f;
+
+    // float max_gain = party_mode ? 0.8f : 0.1f;
+    // float gain_bass = volume_bass > max_gain ? max_gain : volume_bass;
+    // float gain_mid = volume_mid > max_gain ? max_gain : volume_mid;
+
+    if (party_mode)
+    {
+        volume_bass = 1.0f;
+        volume_mid = 1.0f;
+    }
+    else
+    {
+        volume_bass = 0.3f;
+        volume_mid = 0.3f;
+    }
 
     for (size_t i = 0; i < samples; i++)
     {
         float x = (float)(audio_in[i] * vol_factor);
 
-        // فیلتر پایین‌گذر (bass)
         lp_y = IIR_ALPHA * x + (1.0f - IIR_ALPHA) * lp_y;
-        float bass = lp_y * volume_bass;
+        // float bass = lp_y * volume_bass;
+        float bass = x * volume_bass;
+        
         if (bass > 32767)
             bass = 32767;
         if (bass < -32768)
             bass = -32768;
         audio_bass[i] = (int16_t)bass;
 
-        // فیلتر بالاگذر مکمل (mid/tweeter)
         float mid = (x - lp_y) * volume_mid;
         if (mid > 32767)
             mid = 32767;
