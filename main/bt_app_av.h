@@ -70,7 +70,6 @@ extern bool party_mode ;
 /* Application layer causes delay value */
 #define APP_DELAY_VALUE 50 // 5ms
 
-#define ENCODER_SW_GPIO 5
 #define ENCODER_PIN_A 12
 #define ENCODER_PIN_B 13
 

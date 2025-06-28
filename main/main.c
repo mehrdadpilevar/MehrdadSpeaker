@@ -27,16 +27,17 @@
 
 #include "driver/gpio.h"
 #include "esp_timer.h"
+#include "web_control.h"
 
 #define RELAY_GPIO 18
 #define ENCODER_SW_GPIO 19 
 #define CLICK_TIMEOUT_MS 400
 
-bool party_mode=false; 
+bool party_mode = false;
 bool is_playing = false;
+bool system_on = false;
 
 
-static bool system_on = false;
 static const char local_device_name[] = CONFIG_EXAMPLE_LOCAL_DEVICE_NAME;
 enum
 {
@@ -197,7 +198,7 @@ static void bt_av_hdl_stack_evt(uint16_t event, void *p_param)
     }
 }
 
-static void system_start(void)
+ void system_start(void)
 {
     gpio_set_level(RELAY_GPIO, 1);
 
@@ -217,7 +218,7 @@ static void system_start(void)
     system_on = true;
 }
 
-static void system_stop(void)
+ void system_stop(void)
 {
     gpio_set_level(RELAY_GPIO, 0);
 
@@ -245,23 +246,6 @@ static void system_stop(void)
 
 void encoder_task(void *arg)
 {
-    // مقداردهی اولیه پایه رله
-    gpio_config_t io_conf = {
-        .pin_bit_mask = (1ULL << RELAY_GPIO),
-        .mode = GPIO_MODE_OUTPUT,
-        .pull_up_en = GPIO_PULLUP_DISABLE,
-        .pull_down_en = GPIO_PULLDOWN_DISABLE,
-        .intr_type = GPIO_INTR_DISABLE};
-    gpio_config(&io_conf);
-    gpio_set_level(RELAY_GPIO, 0);    // رله خاموش در ابتدا
-
-    gpio_set_direction(PARTY_MODE_LED_GPIO, GPIO_MODE_OUTPUT); // مقداردهی اولیه پایه LED
-    gpio_set_level(PARTY_MODE_LED_GPIO, 0); // رله خاموش در ابتدا
-
-    // مقداردهی اولیه پایه دکمه
-    gpio_set_direction(ENCODER_SW_GPIO, GPIO_MODE_INPUT);
-    gpio_pullup_en(ENCODER_SW_GPIO);
-
     int last_state = 1;
     int click_count = 0;
     int64_t last_click_time = 0;
@@ -356,8 +340,8 @@ void encoder_task(void *arg)
                     }
                     else if (click_count == 4)
                     {
-                        party_mode = !party_mode;                                  // تغییر وضعیت مد پارتی
-                        gpio_set_level(PARTY_MODE_LED_GPIO, (party_mode ? 1 : 0)); // روشن/خاموش کردن LED
+                        party_mode = !party_mode;
+                        gpio_set_level(PARTY_MODE_LED_GPIO, (party_mode ? 1 : 0));
                     }
                 }
                 click_count = 0;
@@ -371,6 +355,23 @@ void encoder_task(void *arg)
 
 void app_main(void)
 {
+    // مقداردهی اولیه پایه رله (قبل از هر چیز)
+    gpio_config_t io_conf = {
+        .pin_bit_mask = (1ULL << RELAY_GPIO),
+        .mode = GPIO_MODE_OUTPUT,
+        .pull_up_en = GPIO_PULLUP_DISABLE,
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        .intr_type = GPIO_INTR_DISABLE};
+    gpio_config(&io_conf);
+    gpio_set_level(RELAY_GPIO, 0);    // رله خاموش در ابتدا
+
+    // مقداردهی اولیه پایه LED پارتی‌مد
+    gpio_set_direction(PARTY_MODE_LED_GPIO, GPIO_MODE_OUTPUT);
+    gpio_set_level(PARTY_MODE_LED_GPIO, 0);
+
+    // مقداردهی اولیه پایه دکمه (در صورت نیاز)
+    gpio_set_direction(ENCODER_SW_GPIO, GPIO_MODE_INPUT);
+    gpio_pullup_en(ENCODER_SW_GPIO);
 
     esp_err_t err = nvs_flash_init();
     if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND)
@@ -382,57 +383,10 @@ void app_main(void)
 
     ESP_ERROR_CHECK(esp_bt_controller_mem_release(ESP_BT_MODE_BLE));
 
+    wifi_init_softap();
+    start_webserver();
+
     xTaskCreate(encoder_task, "encoder_task", 4096, NULL, 5, NULL);
 
-    //     char bda_str[18] = {0};
-    //     esp_err_t err = nvs_flash_init();
-    //     if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
-    //         ESP_ERROR_CHECK(nvs_flash_erase());
-    //         err = nvs_flash_init();
-    //     }
-    //     ESP_ERROR_CHECK(err);
-
-    //     ESP_ERROR_CHECK(esp_bt_controller_mem_release(ESP_BT_MODE_BLE));
-
-    //     esp_bt_controller_config_t bt_cfg = BT_CONTROLLER_INIT_CONFIG_DEFAULT();
-    //     if ((err = esp_bt_controller_init(&bt_cfg)) != ESP_OK) {
-    //         ESP_LOGE(BT_AV_TAG, "%s initialize controller failed: %s", __func__, esp_err_to_name(err));
-    //         return;
-    //     }
-    //     if ((err = esp_bt_controller_enable(ESP_BT_MODE_CLASSIC_BT)) != ESP_OK) {
-    //         ESP_LOGE(BT_AV_TAG, "%s enable controller failed: %s", __func__, esp_err_to_name(err));
-    //         return;
-    //     }
-
-    //     esp_bluedroid_config_t bluedroid_cfg = BT_BLUEDROID_INIT_CONFIG_DEFAULT();
-    // #if (CONFIG_EXAMPLE_A2DP_SINK_SSP_ENABLED == false)
-    //     bluedroid_cfg.ssp_en = false;
-    // #endif
-    //     if ((err = esp_bluedroid_init_with_cfg(&bluedroid_cfg)) != ESP_OK) {
-    //         ESP_LOGE(BT_AV_TAG, "%s initialize bluedroid failed: %s", __func__, esp_err_to_name(err));
-    //         return;
-    //     }
-
-    //     if ((err = esp_bluedroid_enable()) != ESP_OK) {
-    //         ESP_LOGE(BT_AV_TAG, "%s enable bluedroid failed: %s", __func__, esp_err_to_name(err));
-    //         return;
-    //     }
-
-    // #if (CONFIG_EXAMPLE_A2DP_SINK_SSP_ENABLED == true)
-    //     esp_bt_sp_param_t param_type = ESP_BT_SP_IOCAP_MODE;
-    //     esp_bt_io_cap_t iocap = ESP_BT_IO_CAP_IO;
-    //     esp_bt_gap_set_security_param(param_type, &iocap, sizeof(uint8_t));
-    // #endif
-
-    //     esp_bt_pin_type_t pin_type = ESP_BT_PIN_TYPE_FIXED;
-    //     esp_bt_pin_code_t pin_code;
-    //     pin_code[0] = '1';
-    //     pin_code[1] = '2';
-    //     pin_code[2] = '3';
-    //     pin_code[3] = '4';
-    //     esp_bt_gap_set_pin(pin_type, 4, pin_code);
-
-    //     ESP_LOGI(BT_AV_TAG, "Own address:[%s]", bda2str((uint8_t *)esp_bt_dev_get_address(), bda_str, sizeof(bda_str)));
-    //     bt_app_task_start_up();
-    //     bt_app_work_dispatch(bt_av_hdl_stack_evt, BT_APP_EVT_STACK_UP, NULL, 0, NULL);
+    // ... سایر کدهای راه‌اندازی (در صورت نیاز) ...
 }
